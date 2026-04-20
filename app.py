@@ -9,56 +9,32 @@ ID_NOME = "entry.263979686"
 ID_RESPOSTAS = "entry.630983224" 
 FORM_URL = f"https://docs.google.com/forms/d/e/{ID_DO_FORM}/formResponse"
 
-st.set_page_config(page_title="Corretor Pro", layout="wide")
+st.set_page_config(page_title="Corretor Profissional", layout="centered")
 
-# --- CSS PARA CÂMARA GIGANTE SEM CORTES ---
-st.markdown("""
-    <style>
-    .block-container {
-        padding: 1rem !important;
-    }
-    
-    div[data-testid="stCameraInput"] {
-        width: 100% !important;
-    }
-    
-    div[data-testid="stCameraInput"] video {
-        width: 100% !important;
-        height: auto !important; /* Altura automática baseada no conteúdo */
-        border: 4px solid #00ff00 !important;
-        border-radius: 10px;
-        object-fit: contain !important; /* MOSTRA A FOTO INTEIRA SEM CORTAR */
-        background-color: black;
-    }
-
-    button[data-testid="stBaseButton-secondary"] {
-        width: 100% !important;
-        height: 3.5rem !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-st.title("🎯 Corretor 90Q")
+st.title("🎯 Corretor Digital 90Q")
+st.write("Dica: Use a câmera nativa para melhor foco e enquadramento.")
 
 nome_aluno = st.text_input("Nome do Aluno:")
-foto = st.camera_input("Enquadre o Gabarito Completo")
 
-if foto and nome_aluno:
+# --- BOTÃO QUE ABRE A CÂMERA DO CELULAR EM TELA CHEIA ---
+# O segredo está no 'label' e no tipo de arquivo
+foto_upload = st.file_uploader("CLIQUE AQUI PARA TIRAR FOTO", type=['jpg', 'jpeg', 'png'])
+
+if foto_upload and nome_aluno:
     # 1. Ler a imagem
-    file_bytes = np.asarray(bytearray(foto.read()), dtype=np.uint8)
+    file_bytes = np.asarray(bytearray(foto_upload.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
     
-    # 2. Rotação automática (se estiver deitada, coloca em pé)
+    # 2. Rotação Inteligente
     h, w = img.shape[:2]
     if w > h:
         img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
     
-    # 3. Redimensionamento de Segurança (A4 Digital)
-    # Aqui garantimos que nada se perde no processamento
+    # 3. Redimensionamento Padrão
     img = cv2.resize(img, (800, 1100))
     img_viz = img.copy()
     
-    # 4. Processamento de Imagem
+    # 4. Processamento
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
     thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
@@ -101,4 +77,4 @@ if foto and nome_aluno:
         dados = {ID_NOME: nome_aluno, ID_RESPOSTAS: texto_respostas}
         requests.post(FORM_URL, data=dados)
         st.balloons()
-        st.success("Dados enviados!")
+        st.success("Enviado com sucesso!")
