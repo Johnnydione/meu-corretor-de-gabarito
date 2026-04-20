@@ -51,7 +51,6 @@ def corrigir_perspectiva(img):
                 np.linalg.norm(pts[0] - pts[3])
             ))
 
-            # evita erro bizarro
             if largura < 500 or altura < 800:
                 continue
 
@@ -70,14 +69,14 @@ def corrigir_perspectiva(img):
 # -----------------------------
 # 📤 INPUT
 # -----------------------------
-nome_aluno = st.text_input("1. Nome do Aluno:")
+nome_aluno = st.text_input("Nome do Aluno")
 
 foto_upload = st.file_uploader(
-    "2. Envie a FOTO",
+    "Envie a FOTO do gabarito",
     type=['jpg', 'jpeg', 'png']
 )
 
-if st.button("🔄 Limpar imagem"):
+if st.button("🔄 Limpar"):
     st.rerun()
 
 # -----------------------------
@@ -97,19 +96,17 @@ if foto_upload is not None and nome_aluno:
         st.error("Erro ao ler imagem.")
         st.stop()
 
-    # reduzir tamanho automaticamente
+    # reduzir tamanho
     if img.shape[1] > 1500:
         scale = 1500 / img.shape[1]
         img = cv2.resize(img, (0,0), fx=scale, fy=scale)
 
-    st.image(img, caption="Imagem carregada")
+    st.image(img, caption="Imagem original")
 
-    # corrigir perspectiva
+    # perspectiva
     img = corrigir_perspectiva(img)
 
     img = cv2.resize(img, (1000, 1400))
-    img_viz = img.copy()
-
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     # threshold inteligente
@@ -121,88 +118,96 @@ if foto_upload is not None and nome_aluno:
                                        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                        cv2.THRESH_BINARY_INV, 21, 5)
 
+    # suaviza
+    thresh = cv2.GaussianBlur(thresh, (5,5), 0)
+
     st.image(thresh, caption="Threshold")
 
-    # detectar contornos
+    # -----------------------------
+    # 🔍 DETECTAR BOLINHAS
+    # -----------------------------
     cnts, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    colunas = []
+    bolhas = []
+
     for c in cnts:
         x, y, w, h = cv2.boundingRect(c)
+        area = w * h
 
-        if h > 300 and w > 50:
-            colunas.append((x, y, w, h))
+        if 15 < w < 80 and 15 < h < 80:
+            if 0.7 < w/h < 1.3:
+                bolhas.append((x, y, w, h))
 
-    colunas = sorted(colunas, key=lambda x: x[2]*x[3], reverse=True)[:5]
-    colunas = sorted(colunas, key=lambda x: x[0])[:3]
+    # debug bolhas
+    debug_bolhas = img.copy()
+    for (x,y,w,h) in bolhas:
+        cv2.rectangle(debug_bolhas, (x,y), (x+w,y+h), (255,0,0), 1)
 
-    # debug visual
-    debug = img.copy()
-    for (x,y,w,h) in colunas:
-        cv2.rectangle(debug, (x,y), (x+w,y+h), (0,255,0), 2)
-
-    st.image(debug, caption="Colunas detectadas")
+    st.image(debug_bolhas, caption="Bolinhas detectadas")
 
     # -----------------------------
-    # 🎯 LEITURA
+    # 🧠 AGRUPAR EM QUESTÕES
     # -----------------------------
-    if len(colunas) == 3:
+    bolhas = sorted(bolhas, key=lambda x: x[1])
 
-        respostas_finais = {}
-        OPCOES = ['A', 'B', 'C', 'D', 'E']
+    linhas = []
+    linha_atual = []
 
-        for i, (x, y, w, h) in enumerate(colunas):
+    for b in bolhas:
+        if not linha_atual:
+            linha_atual.append(b)
+            continue
 
-            roi = thresh[y+5:y+h-5, x+5:x+w-5]
-            h_roi, w_roi = roi.shape
+        if abs(b[1] - linha_atual[0][1]) < 20:
+            linha_atual.append(b)
+        else:
+            linhas.append(linha_atual)
+            linha_atual = [b]
 
-            start_q = [1, 31, 61][i]
+    if linha_atual:
+        linhas.append(linha_atual)
 
-            for q_idx in range(30):
-                q_num = start_q + q_idx
+    # -----------------------------
+    # 🎯 LER RESPOSTAS
+    # -----------------------------
+    respostas_finais = {}
+    OPCOES = ['A', 'B', 'C', 'D', 'E']
 
-                y1 = int(q_idx * (h_roi / 30))
-                y2 = int((q_idx + 1) * (h_roi / 30))
+    for i, linha in enumerate(linhas[:90]):
+        linha = sorted(linha, key=lambda x: x[0])
 
-                fatia = roi[y1:y2, :]
-                partes = np.array_split(fatia, 5, axis=1)
+        valores = []
 
-                pixels = []
-                for p in partes:
-                    hp, wp = p.shape
-                    miolo = p[int(hp*0.2):int(hp*0.8),
-                              int(wp*0.2):int(wp*0.8)]
-                    pixels.append(cv2.countNonZero(miolo))
+        for (x, y, w, h) in linha[:5]:
+            bolha = thresh[y:y+h, x:x+w]
+            valores.append(cv2.countNonZero(bolha))
 
-                v = sorted(pixels, reverse=True)
-                p1, p2 = v[0], v[1]
+        if len(valores) < 5:
+            respostas_finais[i+1] = "X"
+            continue
 
-                if p1 < 15:
-                    respostas_finais[q_num] = "X"
-                elif p1 > 50 and (p1 - p2) > (p1 * 0.2):
-                    respostas_finais[q_num] = OPCOES[np.argmax(pixels)]
-                else:
-                    respostas_finais[q_num] = "X"
+        v = sorted(valores, reverse=True)
+        p1, p2 = v[0], v[1]
 
-                # desenhar resposta
-                cv2.putText(img_viz, respostas_finais[q_num],
-                            (x+5, y + int((q_idx+0.5)*(h/30))),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,0,0), 1)
+        if p1 < 20:
+            respostas_finais[i+1] = "X"
+        elif (p1 - p2) > (p1 * 0.2):
+            respostas_finais[i+1] = OPCOES[np.argmax(valores)]
+        else:
+            respostas_finais[i+1] = "X"
 
-        st.image(img_viz, caption="Resultado final")
+    # -----------------------------
+    # 📊 RESULTADO
+    # -----------------------------
+    resultado_str = "".join([respostas_finais.get(q, "X") for q in range(1, 91)])
 
-        resultado_str = "".join([respostas_finais.get(q, "X") for q in range(1, 91)])
+    st.write(f"**Nome:** {nome_aluno}")
+    st.write(f"**Respostas:** {resultado_str}")
 
-        st.write(f"**Nome:** {nome_aluno}")
-        st.write(f"**Respostas:** {resultado_str}")
-
-        if st.button("ENVIAR"):
-            requests.post(FORM_URL, data={
-                ID_NOME: nome_aluno,
-                ID_RESPOSTAS: resultado_str
-            })
-            st.success("Enviado com sucesso!")
-            st.balloons()
-
-    else:
-        st.error(f"Detectei {len(colunas)} colunas. Tente melhorar a foto.")
+    if st.button("ENVIAR"):
+        requests.post(FORM_URL, data={
+            ID_NOME: nome_aluno,
+            ID_RESPOSTAS: resultado_str
+        })
+        st.success("Enviado com sucesso!")
+        st.balloons()
