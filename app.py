@@ -1,58 +1,67 @@
 import streamlit as st
 import cv2
 import numpy as np
-import pandas as pd
-from streamlit_gsheets import GSheetsConnection
+import requests
 
-st.set_page_config(page_title="Corretor Google Sheets", layout="wide")
-st.title("Corretor Automático")
+# --- CONFIGURAÇÃO DO GOOGLE FORMS (COLE SEUS DADOS AQUI) ---
+# Substitua o que está entre aspas pelos dados que você extraiu do seu link
+ID_DO_FORM = "1FAIpQLSfDtXbWM__6tHs_fk-6IQSHJpuCmvKDDSArfFFfYrJEGuTLTQ" 
+ID_NOME = "entry.263979686"    
+ID_RESPOSTAS = "entry.630983224" 
 
-# --- CONEXÃO COM O GOOGLE SHEETS ---
-url = "https://docs.google.com/spreadsheets/d/1eTdENl07I0w9M2BtspDJhz15c6Jrv0TxlXWF4SQLpjI/edit?usp=sharing"
-conn = st.connection("gsheets", type=GSheetsConnection)
+# Aqui o código monta o link de envio automaticamente
+FORM_URL = f"https://docs.google.com/forms/d/e/{ID_DO_FORM}/formResponse"
 
-# --- INTERFACE ---
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Corretor Pro 90", layout="centered")
+st.title("🎯 Corretor Automático (90 Questões)")
+
 nome_aluno = st.text_input("Nome do Aluno:")
-foto = st.camera_input("Tirar foto do Gabarito")
+foto = st.camera_input("Tire a foto do Gabarito")
 
 if foto and nome_aluno:
-    # 1. Processamento da Imagem (OMR)
+    # 1. Converter imagem
     img_array = np.asarray(bytearray(foto.read()), dtype=np.uint8)
     img = cv2.imdecode(img_array, 1)
+    
+    # 2. Processamento da imagem (Transforma em preto e branco)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
 
+    # 3. Lógica de Leitura (Simulando 90 fatias)
+    respostas = []
     OPCOES = ['A', 'B', 'C', 'D', 'E']
-    respostas_aluno = []
-
-    # Fatiar em 90 questões
+    
+    # Divide a imagem em 90 linhas horizontais
     fatias = np.array_split(thresh, 90)
+    
     for fatia in fatias:
+        # Divide cada linha em 5 colunas
         opcoes_v = np.array_split(fatia, 5, axis=1)
         pixels = [cv2.countNonZero(opt) for opt in opcoes_v]
-        respostas_aluno.append(OPCOES[np.argmax(pixels)])
-
-    # 2. Preparar dados para o Google Sheets
-    novo_dado = {"Nome": [nome_aluno]}
-    for i, resp in enumerate(respostas_aluno):
-        novo_dado[f"Q{i+1}"] = [resp]
+        indice_marcado = np.argmax(pixels)
+        respostas.append(OPCOES[indice_marcado])
     
-    df_novo = pd.DataFrame(novo_dado)
+    # Junta as 90 respostas em um texto só separado por vírgula
+    texto_respostas = ", ".join(respostas)
 
-    # 3. Enviar para o Google Sheets
-    if st.button("ENVIAR RESULTADO PARA O GOOGLE SHEETS"):
+    st.success("Leitura concluída!")
+    st.write(f"**Respostas detectadas:** {texto_respostas[:50]}...") # Mostra só o começo pra não poluir
+
+    # 4. Botão de Envio
+    if st.button("ENVIAR PARA PLANILHA"):
+        # Monta os dados para o Google
+        dados_para_envio = {
+            ID_NOME: nome_aluno,
+            ID_RESPOSTAS: texto_respostas
+        }
+        
         try:
-            # Lê os dados atuais da planilha
-            dados_existentes = conn.read(spreadsheet=url)
-            # Junta o novo aluno com os antigos
-            df_final = pd.concat([dados_existentes, df_novo], ignore_index=True)
-            # Salva de volta na planilha
-            conn.update(spreadsheet=url, data=df_final)
-            st.success(f"✅ Dados de {nome_aluno} enviados para a planilha!")
-        except Exception as e:
-            st.error(f"Erro ao conectar: {e}. Verifique as permissões de compartilhamento da planilha.")
-
-# Mostrar os últimos resultados na tela
-if st.checkbox("Mostrar resultados da planilha"):
-    df_atual = conn.read(spreadsheet=url)
-    st.dataframe(df_atual)
+            resposta = requests.post(FORM_URL, data=dados_para_envio)
+            if resposta.status_code == 200:
+                st.balloons()
+                st.success(f"✅ Dados de {nome_aluno} enviados com sucesso!")
+            else:
+                st.error("Erro ao enviar. Verifique se o ID do Formulário está correto.")
+        except:
+            st.error("Erro de conexão. Tente novamente.")
