@@ -12,11 +12,8 @@ FORM_URL = f"https://docs.google.com/forms/d/e/{ID_DO_FORM}/formResponse"
 st.set_page_config(page_title="Corretor PRO", layout="centered")
 st.title("🎯 Corretor Digital PRO")
 
-nome_aluno = st.text_input("1. Nome do Aluno:")
-foto_upload = st.file_uploader("2. Envie a FOTO", type=['jpg', 'jpeg', 'png'])
-
 # -----------------------------
-# 📐 CORREÇÃO DE PERSPECTIVA
+# 📐 FUNÇÕES
 # -----------------------------
 def ordenar_pontos(pts):
     pts = pts.reshape(4, 2)
@@ -38,43 +35,76 @@ def corrigir_perspectiva(img):
     cnts, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
 
-    for c in cnts[:5]:  # tenta só os maiores
+    for c in cnts[:5]:
         peri = cv2.arcLength(c, True)
         aprox = cv2.approxPolyDP(c, 0.02 * peri, True)
 
         if len(aprox) == 4:
             pts = ordenar_pontos(aprox)
-            (tl, tr, br, bl) = pts
 
-            largura = int(max(np.linalg.norm(br - bl), np.linalg.norm(tr - tl)))
-            altura = int(max(np.linalg.norm(tr - br), np.linalg.norm(tl - bl)))
+            largura = int(max(
+                np.linalg.norm(pts[2] - pts[3]),
+                np.linalg.norm(pts[1] - pts[0])
+            ))
+            altura = int(max(
+                np.linalg.norm(pts[1] - pts[2]),
+                np.linalg.norm(pts[0] - pts[3])
+            ))
 
-            # ⚠️ validação básica (evita pegar coisa errada)
+            # evita erro bizarro
             if largura < 500 or altura < 800:
                 continue
 
-            dst = np.array([
+            destino = np.array([
                 [0, 0],
                 [largura-1, 0],
                 [largura-1, altura-1],
                 [0, altura-1]
             ], dtype="float32")
 
-            M = cv2.getPerspectiveTransform(pts, dst)
-            warp = cv2.warpPerspective(img, M, (largura, altura))
+            M = cv2.getPerspectiveTransform(pts, destino)
+            return cv2.warpPerspective(img, M, (largura, altura))
 
-            return warp
+    return img
 
-    return img  # fallback
+# -----------------------------
+# 📤 INPUT
+# -----------------------------
+nome_aluno = st.text_input("1. Nome do Aluno:")
+
+foto_upload = st.file_uploader(
+    "2. Envie a FOTO",
+    type=['jpg', 'jpeg', 'png']
+)
+
+if st.button("🔄 Limpar imagem"):
+    st.rerun()
 
 # -----------------------------
 # 🔄 PROCESSAMENTO
 # -----------------------------
-if foto_upload and nome_aluno:
+if foto_upload is not None and nome_aluno:
+
     file_bytes = np.asarray(bytearray(foto_upload.read()), dtype=np.uint8)
+
+    if len(file_bytes) == 0:
+        st.error("Arquivo vazio.")
+        st.stop()
+
     img = cv2.imdecode(file_bytes, 1)
 
-    # perspectiva segura
+    if img is None:
+        st.error("Erro ao ler imagem.")
+        st.stop()
+
+    # reduzir tamanho automaticamente
+    if img.shape[1] > 1500:
+        scale = 1500 / img.shape[1]
+        img = cv2.resize(img, (0,0), fx=scale, fy=scale)
+
+    st.image(img, caption="Imagem carregada")
+
+    # corrigir perspectiva
     img = corrigir_perspectiva(img)
 
     img = cv2.resize(img, (1000, 1400))
@@ -82,58 +112,47 @@ if foto_upload and nome_aluno:
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # -----------------------------
-    # 🧠 THRESHOLD INTELIGENTE
-    # -----------------------------
+    # threshold inteligente
     _, thresh = cv2.threshold(gray, 0, 255,
                               cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-    # fallback se imagem ruim
     if np.mean(thresh) < 15:
         thresh = cv2.adaptiveThreshold(gray, 255,
                                        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                        cv2.THRESH_BINARY_INV, 21, 5)
 
-    # DEBUG (pode comentar depois)
     st.image(thresh, caption="Threshold")
 
-    # -----------------------------
-    # 🔍 CONTORNOS
-    # -----------------------------
+    # detectar contornos
     cnts, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     colunas = []
     for c in cnts:
         x, y, w, h = cv2.boundingRect(c)
 
-        # filtro mais flexível
         if h > 300 and w > 50:
             colunas.append((x, y, w, h))
 
-    # pega maiores áreas
     colunas = sorted(colunas, key=lambda x: x[2]*x[3], reverse=True)[:5]
+    colunas = sorted(colunas, key=lambda x: x[0])[:3]
 
-    # ordena da esquerda pra direita
-    colunas = sorted(colunas, key=lambda x: x[0])
-
-    # pega só 3 melhores
-    colunas = colunas[:3]
-
-    # DEBUG contornos
-    img_debug = img.copy()
+    # debug visual
+    debug = img.copy()
     for (x,y,w,h) in colunas:
-        cv2.rectangle(img_debug, (x,y), (x+w,y+h), (0,255,0), 2)
+        cv2.rectangle(debug, (x,y), (x+w,y+h), (0,255,0), 2)
 
-    st.image(img_debug, caption="Colunas detectadas")
+    st.image(debug, caption="Colunas detectadas")
 
     # -----------------------------
     # 🎯 LEITURA
     # -----------------------------
     if len(colunas) == 3:
+
         respostas_finais = {}
         OPCOES = ['A', 'B', 'C', 'D', 'E']
 
         for i, (x, y, w, h) in enumerate(colunas):
+
             roi = thresh[y+5:y+h-5, x+5:x+w-5]
             h_roi, w_roi = roi.shape
 
@@ -165,7 +184,7 @@ if foto_upload and nome_aluno:
                 else:
                     respostas_finais[q_num] = "X"
 
-                # debug visual
+                # desenhar resposta
                 cv2.putText(img_viz, respostas_finais[q_num],
                             (x+5, y + int((q_idx+0.5)*(h/30))),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,0,0), 1)
@@ -182,7 +201,7 @@ if foto_upload and nome_aluno:
                 ID_NOME: nome_aluno,
                 ID_RESPOSTAS: resultado_str
             })
-            st.success("Enviado!")
+            st.success("Enviado com sucesso!")
             st.balloons()
 
     else:
