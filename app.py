@@ -7,7 +7,8 @@ import requests
 ID_DO_FORM = "1FAIpQLSfDtXbWM__6tHs_fk-6IQSHJpuCmvKDDSArfFFfYrJEGuTLTQ" 
 ID_NOME = "entry.263979686"    
 ID_RESPOSTAS = "entry.630983224" 
-FORM_URL = f"https://docs.google.com/forms/e/e/{ID_DO_FORM}/formResponse"
+# Corrigido para a URL padrão do Forms
+FORM_URL = f"https://docs.google.com/forms/d/e/{ID_DO_FORM}/formResponse"
 
 st.set_page_config(page_title="Corretor Inteligente 90Q", layout="centered")
 
@@ -50,9 +51,8 @@ if foto_upload and nome_aluno:
         x, y, w_box, h_box = cv2.boundingRect(all_pts)
         
         # --- AJUSTE DE PRECISÃO (OFFSETS) ---
-        # Recuamos um pouco para a grade azul ignorar os quadrados e focar nas questões
-        offset_y = int(h_box * 0.052) # Ajuste vertical (5.2%)
-        offset_x = int(w_box * 0.035) # Ajuste horizontal (3.5%)
+        offset_y = int(h_box * 0.052) 
+        offset_x = int(w_box * 0.035) 
         
         x_final, y_final = x + offset_x, y + offset_y
         w_final, h_final = w_box - (2 * offset_x), h_box - (2 * offset_y)
@@ -60,7 +60,6 @@ if foto_upload and nome_aluno:
         roi_thresh = thresh[y_final:y_final+h_final, x_final:x_final+w_final]
         img_viz_roi = img_viz[y_final:y_final+h_final, x_final:x_final+w_final]
         
-        # Desenha o retângulo de leitura azul (Área Útil)
         cv2.rectangle(img_viz, (x_final, y_final), (x_final+w_final, y_final+h_final), (255, 0, 0), 3)
     else:
         st.warning("⚠️ Quadrados não detectados! Tente uma foto mais clara.")
@@ -77,7 +76,6 @@ if foto_upload and nome_aluno:
     
     for c_idx in range(3):
         coluna_img = roi_thresh[:, c_idx*w_col : (c_idx+1)*w_col]
-        # Desenha divisórias de colunas
         cv2.line(img_viz_roi, (c_idx*w_col, 0), (c_idx*w_col, alt_roi), (255, 0, 0), 2)
         
         start_q = (c_idx * 30) + 1
@@ -86,7 +84,6 @@ if foto_upload and nome_aluno:
             y_start = q_idx * h_row
             y_end = (q_idx + 1) * h_row
             
-            # Desenha linha da questão (Verde)
             cv2.line(img_viz_roi, (c_idx*w_col, y_start), ((c_idx+1)*w_col, y_start), (0, 255, 0), 1)
             
             questao_crop = coluna_img[y_start:y_end, :]
@@ -104,7 +101,7 @@ if foto_upload and nome_aluno:
 
     # 6. EXIBIR RESULTADOS
     st.subheader("3. Conferência Visual")
-    st.image(img_viz, caption="O retângulo azul deve cercar apenas as bolinhas.", use_container_width=True)
+    st.image(img_viz, use_container_width=True)
     
     resultado_str = ", ".join([respostas_finais[q] for q in range(1, 91)])
     st.write(f"**Gabarito Lido:** {resultado_str[:120]}...")
