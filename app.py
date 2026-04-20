@@ -9,11 +9,11 @@ ID_NOME = "entry.263979686"
 ID_RESPOSTAS = "entry.630983224" 
 FORM_URL = f"https://docs.google.com/forms/d/e/{ID_DO_FORM}/formResponse"
 
-st.set_page_config(page_title="Corretor 90Q - Scanner", layout="centered")
-st.title("🎯 Corretor Digital Pro (Papel)")
+st.set_page_config(page_title="Corretor 90Q - Ajuste Final", layout="centered")
+st.title("🎯 Corretor Digital Pro")
 
 nome_aluno = st.text_input("1. Nome do Aluno:")
-foto_upload = st.file_uploader("2. Envie a FOTO do gabarito", type=['jpg', 'jpeg', 'png'])
+foto_upload = st.file_uploader("2. Envie a FOTO", type=['jpg', 'jpeg', 'png'])
 
 if foto_upload and nome_aluno:
     file_bytes = np.asarray(bytearray(foto_upload.read()), dtype=np.uint8)
@@ -21,33 +21,31 @@ if foto_upload and nome_aluno:
     img = cv2.resize(img, (1000, 1400))
     img_viz = img.copy()
     
-    # --- TRATAMENTO PARA PAPEL ---
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # O GaussianBlur suaviza ruídos do papel (grãos da impressão)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    # O Adaptive Threshold lida com sombras: ele calcula o preto baseado na luz ao redor
-    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                   cv2.THRESH_BINARY_INV, 11, 2)
+    
+    # --- AJUSTE PARA FOTO DE PAPEL ---
+    # Aumentamos o bloco do adaptiveThreshold para 21 para lidar com sombras maiores
+    thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                   cv2.THRESH_BINARY_INV, 21, 5)
 
-    # Localizar Colunas
     cnts, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    colunas_encontradas = []
+    colunas = []
     for c in cnts:
         x, y, w, h = cv2.boundingRect(c)
-        if w > 80 and h > 400: # Filtro um pouco mais aberto para papel
-            colunas_encontradas.append((x, y, w, h))
+        if w > 80 and h > 400:
+            colunas.append((x, y, w, h))
 
-    colunas_encontradas = sorted(colunas_encontradas, key=lambda x: x[0])[:3]
+    colunas = sorted(colunas, key=lambda x: x[0])[:3]
 
-    if len(colunas_encontradas) == 3:
+    if len(colunas) == 3:
         respostas_finais = {}
         OPCOES = ['A', 'B', 'C', 'D', 'E']
 
-        for i, (x, y, w, h) in enumerate(colunas_encontradas):
+        for i, (x, y, w, h) in enumerate(colunas):
             cv2.rectangle(img_viz, (x, y), (x+w, y+h), (0, 255, 0), 2)
             
-            # Margem interna generosa para ignorar a linha preta do retângulo impresso
-            roi_col = thresh[y+8:y+h-8, x+8:x+w-8]
+            # ROI com margem menor para garantir que não perdemos as bordas das bolinhas
+            roi_col = thresh[y+5:y+h-5, x+5:x+w-5]
             h_roi, w_roi = roi_col.shape
             start_q = [1, 31, 61][i]
 
@@ -62,29 +60,32 @@ if foto_upload and nome_aluno:
                 pixels = []
                 for f in fatias:
                     hf, wf = f.shape
-                    # Focamos no centro (o "alvo" da caneta)
-                    miolo = f[int(hf*0.3):int(hf*0.7), int(wf*0.3):int(wf*0.7)]
+                    # Expandimos um pouco o miolo para 80% da área (0.1 a 0.9)
+                    # Isso ajuda se a marcação do aluno for meio "desleixada"
+                    miolo = f[int(hf*0.1):int(hf*0.9), int(wf*0.1):int(wf*0.9)]
                     pixels.append(cv2.countNonZero(miolo))
                 
                 v_ord = sorted(pixels, reverse=True)
                 p1, p2 = v_ord[0], v_ord[1]
                 
-                # Para papel, aumentamos um pouco a tolerância de "branco"
-                # porque a impressão pode deixar pontinhos pretos
-                limite_vazio = 12 
-                
-                if p1 < limite_vazio or (p1 - p2) < (p1 * 0.45):
-                    respostas_finais[q_num] = "X"
-                else:
+                # --- AJUSTE DE SENSIBILIDADE PARA PAPEL ---
+                # Se o miolo tem pelo menos 10 pixels pretos, consideramos que há marcação
+                if p1 < 10: 
+                    respostas_finais[q_num] = "X" # Branco
+                # Se a marcação for clara (p1 bem maior que p2), aceitamos
+                elif (p1 - p2) > (p1 * 0.3):
                     respostas_finais[q_num] = OPCOES[np.argmax(pixels)]
+                # Caso contrário, é dupla ou ambíguo
+                else:
+                    respostas_finais[q_num] = "X"
 
-        st.image(img_viz, caption="Detecção ativa em papel")
+        st.image(img_viz)
         resultado_str = ", ".join([respostas_finais.get(q, "X") for q in range(1, 91)])
-        st.write(f"**Lido:** {resultado_str[:200]}...")
+        st.write(f"**Resultado:** {resultado_str[:200]}...")
 
-        if st.button("ENVIAR PARA PLANILHA"):
+        if st.button("ENVIAR"):
             requests.post(FORM_URL, data={ID_NOME: nome_aluno, ID_RESPOSTAS: resultado_str})
             st.balloons()
             st.success("Enviado!")
     else:
-        st.error(f"Achei {len(colunas_encontradas)} colunas. Tente centralizar mais a folha na foto.")
+        st.error(f"Achei {len(colunas)} colunas. Garanta que a foto não tenha reflexos fortes nas linhas pretas.")
