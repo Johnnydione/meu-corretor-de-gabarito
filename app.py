@@ -76,4 +76,31 @@ if foto and nome_aluno:
 
     # Lógica de Leitura
     respostas_finais = {}
-    OPCOES = ['A', 'B', 'C', 'D',
+    OPCOES = ['A', 'B', 'C', 'D', 'E']
+    colunas_fatias = np.array_split(thresh, 3, axis=1)
+    
+    for c_idx, coluna in enumerate(colunas_fatias):
+        start_q = (c_idx * 30) + 1
+        questoes = np.array_split(coluna, 30)
+        for q_idx, questao_img in enumerate(questoes):
+            q_num = start_q + q_idx
+            alternativas = np.array_split(questao_img, 5, axis=1)
+            pixels = [cv2.countNonZero(alt) for alt in alternativas]
+            p_ord = sorted(pixels, reverse=True)
+            if p_ord[0] < 40:
+                respostas_finais[q_num] = "BRANCO"
+            elif (p_ord[0] - p_ord[1]) < 30:
+                respostas_finais[q_num] = "DUPLA"
+            else:
+                respostas_finais[q_num] = OPCOES[np.argmax(pixels)]
+
+    st.subheader("Conferência")
+    st.image(img_viz, use_container_width=True)
+    
+    texto_respostas = ", ".join([respostas_finais[q] for q in range(1, 91)])
+    
+    if st.button("ENVIAR PARA PLANILHA"):
+        dados = {ID_NOME: nome_aluno, ID_RESPOSTAS: texto_respostas}
+        requests.post(FORM_URL, data=dados)
+        st.balloons()
+        st.success("Enviado!")
