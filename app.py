@@ -4,6 +4,7 @@ import numpy as np
 import requests
 
 # --- CONFIGURAÇÃO ---
+# Mantenha os IDs exatamente como estão no seu formulário original
 ID_DO_FORM = "1FAIpQLSfDtXbWM__6tHs_fk-6IQSHJpuCmvKDDSArfFFfYrJEGuTLTQ" 
 ID_NOME = "entry.263979686"    
 ID_RESPOSTAS = "entry.630983224" 
@@ -23,8 +24,7 @@ if foto_upload and nome_aluno:
     
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # --- AJUSTE PARA FOTO DE PAPEL ---
-    # Aumentamos o bloco do adaptiveThreshold para 21 para lidar com sombras maiores
+    # --- PROCESSAMENTO DA IMAGEM ---
     thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
                                    cv2.THRESH_BINARY_INV, 21, 5)
 
@@ -44,7 +44,6 @@ if foto_upload and nome_aluno:
         for i, (x, y, w, h) in enumerate(colunas):
             cv2.rectangle(img_viz, (x, y), (x+w, y+h), (0, 255, 0), 2)
             
-            # ROI com margem menor para garantir que não perdemos as bordas das bolinhas
             roi_col = thresh[y+5:y+h-5, x+5:x+w-5]
             h_roi, w_roi = roi_col.shape
             start_q = [1, 31, 61][i]
@@ -60,32 +59,30 @@ if foto_upload and nome_aluno:
                 pixels = []
                 for f in fatias:
                     hf, wf = f.shape
-                    # Expandimos um pouco o miolo para 80% da área (0.1 a 0.9)
-                    # Isso ajuda se a marcação do aluno for meio "desleixada"
                     miolo = f[int(hf*0.1):int(hf*0.9), int(wf*0.1):int(wf*0.9)]
                     pixels.append(cv2.countNonZero(miolo))
                 
                 v_ord = sorted(pixels, reverse=True)
                 p1, p2 = v_ord[0], v_ord[1]
                 
-                # --- AJUSTE DE SENSIBILIDADE PARA PAPEL ---
-                # Se o miolo tem pelo menos 10 pixels pretos, consideramos que há marcação
                 if p1 < 10: 
-                    respostas_finais[q_num] = "X" # Branco
-                # Se a marcação for clara (p1 bem maior que p2), aceitamos
+                    respostas_finais[q_num] = "X"
                 elif (p1 - p2) > (p1 * 0.3):
                     respostas_finais[q_num] = OPCOES[np.argmax(pixels)]
-                # Caso contrário, é dupla ou ambíguo
                 else:
                     respostas_finais[q_num] = "X"
 
         st.image(img_viz)
-        resultado_str = ", ".join([respostas_finais.get(q, "X") for q in range(1, 91)])
-        st.write(f"**Resultado:** {resultado_str[:200]}...")
+        
+        # MUDANÇA AQUI: Agora as respostas vão todas juntas (ex: ABC...) sem vírgulas
+        resultado_str = "".join([respostas_finais.get(q, "X") for q in range(1, 91)])
+        
+        st.write(f"**Nome:** {nome_aluno}")
+        st.write(f"**Tripa de Respostas:** {resultado_str}")
 
         if st.button("ENVIAR"):
             requests.post(FORM_URL, data={ID_NOME: nome_aluno, ID_RESPOSTAS: resultado_str})
             st.balloons()
-            st.success("Enviado!")
+            st.success("Enviado com sucesso para a planilha!")
     else:
-        st.error(f"Achei {len(colunas)} colunas. Garanta que a foto não tenha reflexos fortes nas linhas pretas.")
+        st.error(f"Erro: Encontradas {len(colunas)} colunas. Tente tirar a foto com mais iluminação.")
