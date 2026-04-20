@@ -9,17 +9,26 @@ ID_NOME = "entry.263979686"
 ID_RESPOSTAS = "entry.630983224" 
 FORM_URL = f"https://docs.google.com/forms/d/e/{ID_DO_FORM}/formResponse"
 
-st.set_page_config(page_title="Corretor Master Pro", layout="wide")
+st.set_page_config(page_title="Corretor Master Pro", layout="centered")
 
-# --- CSS AJUSTADO PARA NÃO CORTAR A FOTO ---
+# --- CSS PARA FORÇAR FORMATO VERTICAL NA CÂMERA ---
 st.markdown("""
     <style>
+    /* Força o container da câmera a ser vertical */
+    div[data-testid="stCameraInput"] {
+        max-width: 450px !important;
+        margin: 0 auto;
+    }
     div[data-testid="stCameraInput"] video {
-        width: 100% !important;
-        height: auto !important;
-        border: 4px solid #00ff00 !important;
+        border: 5px solid #00ff00 !important;
+        border-radius: 15px;
+        aspect-ratio: 3 / 4 !important; /* Proporção de papel */
+        object-fit: cover !important;
+    }
+    /* Estiliza a imagem de visualização para não ficar gigante */
+    .stImage img {
+        border: 2px solid #333;
         border-radius: 10px;
-        object-fit: contain !important; /* Garante que a imagem apareça inteira */
     }
     </style>
     """, unsafe_allow_html=True)
@@ -27,20 +36,22 @@ st.markdown("""
 st.title("🎯 Corretor Digital 90Q")
 
 nome_aluno = st.text_input("Nome do Aluno:")
-foto = st.camera_input("Tire a foto com o celular EM PÉ")
+foto = st.camera_input("Enquadre o Gabarito (Papel em Pé)")
 
 if foto and nome_aluno:
     # 1. Converter imagem
     file_bytes = np.asarray(bytearray(foto.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
 
-    # --- CORREÇÃO DE ROTAÇÃO ---
-    # Se a largura for maior que a altura, a foto está deitada. Vamos girar.
+    # Pegamos as dimensões reais
     h, w = img.shape[:2]
+
+    # --- LÓGICA DE ROTAÇÃO INTELIGENTE ---
+    # Se a foto estiver "deitada" (largura > altura), giramos
     if w > h:
         img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
     
-    # Redimensiona para o padrão A4 vertical
+    # Agora redimensionamos para o padrão vertical fixo
     img = cv2.resize(img, (800, 1100))
     img_viz = img.copy() 
     
@@ -56,9 +67,9 @@ if foto and nome_aluno:
     w_col = 800 // 3
     h_row = 1100 // 30
     for i in range(1, 3):
-        cv2.line(img_viz, (w_col * i, 0), (w_col * i, 1100), (255, 0, 0), 2)
+        cv2.line(img_viz, (w_col * i, 0), (w_col * i, 1100), (255, 0, 0), 3) # Colunas em Azul
     for i in range(30):
-        cv2.line(img_viz, (0, h_row * i), (800, h_row * i), (0, 255, 0), 1)
+        cv2.line(img_viz, (0, h_row * i), (800, h_row * i), (0, 255, 0), 1) # Linhas em Verde
 
     # 3. Lógica de Leitura
     colunas_fatias = np.array_split(thresh, 3, axis=1)
@@ -81,11 +92,17 @@ if foto and nome_aluno:
     respostas_ordenadas = [respostas_finais[q] for q in range(1, 91)]
     texto_respostas = ", ".join(respostas_ordenadas)
 
-    st.subheader("Conferência Visual (A foto deve aparecer inteira aqui):")
-    st.image(img_viz, use_container_width=True)
+    st.subheader("Conferência de Leitura")
+    # Mostra a imagem processada (já em pé)
+    st.image(img_viz, caption="As linhas azuis devem estar entre as colunas do papel", width=400)
     
+    st.write(f"**Gabarito lido:** {texto_respostas[:80]}...")
+
     if st.button("ENVIAR PARA GOOGLE SHEETS"):
-        dados = {ID_NOME: nome_aluno, ID_RESPOSTAS: texto_respostas}
-        requests.post(FORM_URL, data=dados)
-        st.balloons()
-        st.success("Enviado!")
+        try:
+            dados = {ID_NOME: nome_aluno, ID_RESPOSTAS: texto_respostas}
+            requests.post(FORM_URL, data=dados)
+            st.balloons()
+            st.success("Enviado com sucesso!")
+        except:
+            st.error("Erro na conexão.")
