@@ -67,27 +67,36 @@ def corrigir_perspectiva(img):
     return img
 
 # -----------------------------
-# 📤 INPUT
+# 📤 INPUT (UPLOAD ROBUSTO)
 # -----------------------------
+if "img_bytes" not in st.session_state:
+    st.session_state.img_bytes = None
+
 nome_aluno = st.text_input("Nome do Aluno")
 
 foto_upload = st.file_uploader(
     "Envie a FOTO do gabarito",
-    type=['jpg', 'jpeg', 'png']
+    type=["jpg", "jpeg", "png"],
+    key="uploader"
 )
 
 if st.button("🔄 Limpar"):
+    st.session_state.img_bytes = None
     st.rerun()
+
+# salva imagem só uma vez
+if foto_upload is not None and st.session_state.img_bytes is None:
+    st.session_state.img_bytes = foto_upload.read()
 
 # -----------------------------
 # 🔄 PROCESSAMENTO
 # -----------------------------
-if foto_upload is not None and nome_aluno:
+if st.session_state.img_bytes is not None and nome_aluno:
 
-    file_bytes = np.asarray(bytearray(foto_upload.read()), dtype=np.uint8)
+    file_bytes = np.asarray(bytearray(st.session_state.img_bytes), dtype=np.uint8)
 
-    if len(file_bytes) == 0:
-        st.error("Arquivo vazio.")
+    if len(file_bytes) < 1000:
+        st.error("Imagem inválida.")
         st.stop()
 
     img = cv2.imdecode(file_bytes, 1)
@@ -96,12 +105,21 @@ if foto_upload is not None and nome_aluno:
         st.error("Erro ao ler imagem.")
         st.stop()
 
-    # reduzir tamanho
-    if img.shape[1] > 1500:
-        scale = 1500 / img.shape[1]
-        img = cv2.resize(img, (0,0), fx=scale, fy=scale)
+    # 🔧 NORMALIZAÇÃO
+    max_lado = 1200
+    h, w = img.shape[:2]
 
-    st.image(img, caption="Imagem original")
+    if max(h, w) > max_lado:
+        scale = max_lado / max(h, w)
+        img = cv2.resize(img, (0, 0), fx=scale, fy=scale)
+
+    # corrige rotação básica
+    if h > w:
+        pass
+    else:
+        img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+
+    st.image(img, caption="Imagem carregada")
 
     # perspectiva
     img = corrigir_perspectiva(img)
@@ -118,7 +136,6 @@ if foto_upload is not None and nome_aluno:
                                        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                        cv2.THRESH_BINARY_INV, 21, 5)
 
-    # suaviza
     thresh = cv2.GaussianBlur(thresh, (5,5), 0)
 
     st.image(thresh, caption="Threshold")
@@ -132,21 +149,20 @@ if foto_upload is not None and nome_aluno:
 
     for c in cnts:
         x, y, w, h = cv2.boundingRect(c)
-        area = w * h
 
         if 15 < w < 80 and 15 < h < 80:
             if 0.7 < w/h < 1.3:
                 bolhas.append((x, y, w, h))
 
-    # debug bolhas
-    debug_bolhas = img.copy()
+    # debug
+    debug = img.copy()
     for (x,y,w,h) in bolhas:
-        cv2.rectangle(debug_bolhas, (x,y), (x+w,y+h), (255,0,0), 1)
+        cv2.rectangle(debug, (x,y), (x+w,y+h), (255,0,0), 1)
 
-    st.image(debug_bolhas, caption="Bolinhas detectadas")
+    st.image(debug, caption="Bolinhas detectadas")
 
     # -----------------------------
-    # 🧠 AGRUPAR EM QUESTÕES
+    # 🧠 AGRUPAR EM LINHAS
     # -----------------------------
     bolhas = sorted(bolhas, key=lambda x: x[1])
 
