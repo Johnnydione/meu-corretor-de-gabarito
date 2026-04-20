@@ -5,7 +5,7 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 
 st.set_page_config(page_title="Corretor Google Sheets", layout="wide")
-st.title("🚀 Corretor Conectado ao Google Sheets")
+st.title("Corretor Automático")
 
 # --- CONEXÃO COM O GOOGLE SHEETS ---
 url = "https://docs.google.com/spreadsheets/d/1eTdENl07I0w9M2BtspDJhz15c6Jrv0TxlXWF4SQLpjI/edit?gid=0#gid=0"
