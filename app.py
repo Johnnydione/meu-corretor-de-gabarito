@@ -8,7 +8,7 @@ st.set_page_config(page_title="Corretor Google Sheets", layout="wide")
 st.title("Corretor Automático")
 
 # --- CONEXÃO COM O GOOGLE SHEETS ---
-url = "https://docs.google.com/spreadsheets/d/1eTdENl07I0w9M2BtspDJhz15c6Jrv0TxlXWF4SQLpjI/edit?gid=0#gid=0"
+url = "https://docs.google.com/spreadsheets/d/1eTdENl07I0w9M2BtspDJhz15c6Jrv0TxlXWF4SQLpjI/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- INTERFACE ---
