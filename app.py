@@ -3,44 +3,67 @@ import cv2
 import numpy as np
 import requests
 
-# CONFIG
+# --- CONFIG ---
 ID_DO_FORM = "1FAIpQLSfDtXbWM__6tHs_fk-6IQSHJpuCmvKDDSArfFFfYrJEGuTLTQ"
 ID_NOME = "entry.263979686"
 ID_RESPOSTAS = "entry.630983224"
 FORM_URL = f"https://docs.google.com/forms/d/e/{ID_DO_FORM}/formResponse"
 
-st.title("Leitor Profissional de Gabarito")
+st.title("Leitor de Gabarito - Versão Grid Real")
 
-nome = st.text_input("Nome")
-img_file = st.file_uploader("Foto", type=["jpg","png","jpeg"])
+nome = st.text_input("Nome do Aluno")
+img_file = st.file_uploader("Envie a foto", type=["jpg","png","jpeg"])
 
 if img_file and nome:
 
+    # -----------------------------
+    # CARREGAR
+    # -----------------------------
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
 
     img = cv2.resize(img, (1000, 1400))
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # DETECTAR CÍRCULOS (TODOS)
-    circles = cv2.HoughCircles(
-        gray,
-        cv2.HOUGH_GRADIENT,
-        dp=1.2,
-        minDist=20,
-        param1=100,
-        param2=18,
-        minRadius=5,
-        maxRadius=20
+    # -----------------------------
+    # BINARIZAÇÃO FORTE
+    # -----------------------------
+    blur = cv2.GaussianBlur(gray, (5,5), 0)
+
+    thresh = cv2.adaptiveThreshold(
+        blur, 255,
+        cv2.ADAPTIVE_THRESH_MEAN_C,
+        cv2.THRESH_BINARY_INV,
+        15, 3
     )
 
-    if circles is None:
-        st.error("Nenhum ponto detectado")
+    # limpa ruído
+    kernel = np.ones((3,3), np.uint8)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+
+    # -----------------------------
+    # DETECTAR BOLINHAS (BLOBS)
+    # -----------------------------
+    contours, _ = cv2.findContours(
+        thresh,
+        cv2.RETR_LIST,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    pontos = []
+
+    for c in contours:
+        area = cv2.contourArea(c)
+
+        if 30 < area < 500:  # tamanho típico de bolinha
+            (x,y),r = cv2.minEnclosingCircle(c)
+            pontos.append((int(x), int(y)))
+
+    if len(pontos) < 200:
+        st.error(f"Poucos pontos detectados ({len(pontos)})")
         st.stop()
 
-    circles = np.round(circles[0]).astype(int)
-
-    pontos = np.array([[x, y] for x,y,r in circles])
+    pontos = np.array(pontos)
 
     # -----------------------------
     # AGRUPAR POR LINHAS
@@ -48,13 +71,13 @@ if img_file and nome:
     pontos = pontos[pontos[:,1].argsort()]
 
     linhas = []
-    tolerancia = 15
+    tol = 12
 
     for p in pontos:
         colocado = False
 
         for linha in linhas:
-            if abs(linha[0][1] - p[1]) < tolerancia:
+            if abs(linha[0][1] - p[1]) < tol:
                 linha.append(p)
                 colocado = True
                 break
@@ -62,62 +85,56 @@ if img_file and nome:
         if not colocado:
             linhas.append([p])
 
-    # ordenar cada linha
-    for linha in linhas:
-        linha.sort(key=lambda x: x[0])
-
     # ordenar linhas
+    linhas = [sorted(l, key=lambda x: x[0]) for l in linhas]
     linhas.sort(key=lambda l: l[0][1])
 
     # -----------------------------
-    # FILTRAR LINHAS REAIS (questões)
+    # FILTRAR LINHAS COM ALTERNATIVAS
     # -----------------------------
     linhas_validas = [l for l in linhas if len(l) >= 5]
 
-    if len(linhas_validas) < 50:
-        st.error("Poucas linhas detectadas")
+    if len(linhas_validas) < 80:
+        st.error("Não consegui identificar as linhas do gabarito")
         st.stop()
 
     OPCOES = ['A','B','C','D','E']
     respostas = {}
 
+    # -----------------------------
+    # LER QUESTÕES
+    # -----------------------------
     for i, linha in enumerate(linhas_validas[:90]):
 
-        # pegar apenas 5 primeiros pontos (alternativas)
-        linha = linha[:5]
-
-        linha = sorted(linha, key=lambda x: x[0])
+        # pega 5 mais à esquerda (alternativas)
+        linha = sorted(linha, key=lambda x: x[0])[:5]
 
         pixels = []
 
         for (x,y) in linha:
-            r = 12
 
-            y1 = max(y-r, 0)
-            y2 = y+r
-            x1 = max(x-r, 0)
-            x2 = x+r
+            r = 10
 
-            roi = gray[y1:y2, x1:x2]
+            roi = thresh[y-r:y+r, x-r:x+r]
 
-            _, th = cv2.threshold(roi, 0, 255,
-                cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
-            pixels.append(cv2.countNonZero(th))
+            pixels.append(cv2.countNonZero(roi))
 
         v = sorted(pixels, reverse=True)
         p1, p2 = v[0], v[1]
 
-        if p1 < 50:
+        if p1 < 40:
             respostas[i+1] = "X"
         elif (p1 - p2) > p1 * 0.25:
             respostas[i+1] = OPCOES[np.argmax(pixels)]
         else:
             respostas[i+1] = "X"
 
-    resultado = "".join([respostas.get(i,"X") for i in range(1,91)])
+    resultado = "".join([respostas.get(i, "X") for i in range(1,91)])
 
-    st.image(img, caption="Imagem analisada")
+    # -----------------------------
+    # OUTPUT
+    # -----------------------------
+    st.image(thresh, caption="Processado")
     st.write("Respostas:", resultado)
 
     if st.button("ENVIAR"):
@@ -125,4 +142,4 @@ if img_file and nome:
             ID_NOME: nome,
             ID_RESPOSTAS: resultado
         })
-        st.success("Enviado!")
+        st.success("Enviado com sucesso!")
