@@ -3,143 +3,133 @@ import cv2
 import numpy as np
 import requests
 
-# --- CONFIG ---
-ID_DO_FORM = "1FAIpQLSfDtXbWM__6tHs_fk-6IQSHJpuCmvKDDSArfFFfYrJEGuTLTQ"
-ID_NOME = "entry.263979686"
-ID_RESPOSTAS = "entry.630983224"
+# --- CONFIGURAÇÃO ---
+ID_DO_FORM = "1FAIpQLSfDtXbWM__6tHs_fk-6IQSHJpuCmvKDDSArfFFfYrJEGuTLTQ" 
+ID_NOME = "entry.263979686"    
+ID_RESPOSTAS = "entry.630983224" 
 FORM_URL = f"https://docs.google.com/forms/d/e/{ID_DO_FORM}/formResponse"
 
-st.title("Leitor de Gabarito - Versão Grid Real")
+st.set_page_config(page_title="Corretor 90Q", layout="centered")
+st.title("🎯 Corretor Digital")
 
-nome = st.text_input("Nome do Aluno")
-img_file = st.file_uploader("Envie a foto", type=["jpg","png","jpeg"])
+# -----------------------------
+# INPUT
+# -----------------------------
+if "img_bytes" not in st.session_state:
+    st.session_state.img_bytes = None
 
-if img_file and nome:
+nome_aluno = st.text_input("Nome do Aluno")
+foto_upload = st.file_uploader("Envie a FOTO", type=['jpg','jpeg','png'])
 
-    # -----------------------------
-    # CARREGAR
-    # -----------------------------
-    file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
+if st.button("🔄 Limpar"):
+    st.session_state.img_bytes = None
+    st.rerun()
+
+if foto_upload is not None and st.session_state.img_bytes is None:
+    st.session_state.img_bytes = foto_upload.read()
+
+# -----------------------------
+# PROCESSAMENTO
+# -----------------------------
+if st.session_state.img_bytes is not None and nome_aluno:
+
+    file_bytes = np.asarray(bytearray(st.session_state.img_bytes), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
 
     img = cv2.resize(img, (1000, 1400))
+    img_viz = img.copy()
+
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # -----------------------------
-    # BINARIZAÇÃO FORTE
-    # -----------------------------
-    blur = cv2.GaussianBlur(gray, (5,5), 0)
-
     thresh = cv2.adaptiveThreshold(
-        blur, 255,
-        cv2.ADAPTIVE_THRESH_MEAN_C,
+        gray, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY_INV,
-        15, 3
+        21, 5
     )
 
-    # limpa ruído
-    kernel = np.ones((3,3), np.uint8)
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+    cnts, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # -----------------------------
-    # DETECTAR BOLINHAS (BLOBS)
-    # -----------------------------
-    contours, _ = cv2.findContours(
-        thresh,
-        cv2.RETR_LIST,
-        cv2.CHAIN_APPROX_SIMPLE
-    )
+    colunas = []
+    for c in cnts:
+        x, y, w, h = cv2.boundingRect(c)
+        if w > 80 and h > 400:
+            colunas.append((x, y, w, h))
 
-    pontos = []
+    colunas = sorted(colunas, key=lambda x: x[0])[:3]
 
-    for c in contours:
-        area = cv2.contourArea(c)
+    if len(colunas) == 3:
 
-        if 30 < area < 500:  # tamanho típico de bolinha
-            (x,y),r = cv2.minEnclosingCircle(c)
-            pontos.append((int(x), int(y)))
+        respostas_finais = {}
+        OPCOES = ['A','B','C','D','E']
 
-    if len(pontos) < 200:
-        st.error(f"Poucos pontos detectados ({len(pontos)})")
-        st.stop()
+        for i, (x, y, w, h) in enumerate(colunas):
 
-    pontos = np.array(pontos)
+            # ajuste fino horizontal
+            melhor_x = x
+            melhor_score = 0
 
-    # -----------------------------
-    # AGRUPAR POR LINHAS
-    # -----------------------------
-    pontos = pontos[pontos[:,1].argsort()]
+            for dx in range(-15, 16, 3):
+                x_teste = x + dx
+                roi_teste = thresh[y:y+h, x_teste:x_teste+w]
 
-    linhas = []
-    tol = 12
+                score = np.sum(roi_teste)
 
-    for p in pontos:
-        colocado = False
+                if score > melhor_score:
+                    melhor_score = score
+                    melhor_x = x_teste
 
-        for linha in linhas:
-            if abs(linha[0][1] - p[1]) < tol:
-                linha.append(p)
-                colocado = True
-                break
+            x = melhor_x
 
-        if not colocado:
-            linhas.append([p])
+            # corte corrigido
+            roi_col = thresh[y+5:y+h-5, x+5:x+w-5]
 
-    # ordenar linhas
-    linhas = [sorted(l, key=lambda x: x[0]) for l in linhas]
-    linhas.sort(key=lambda l: l[0][1])
+            h_roi, w_roi = roi_col.shape
+            start_q = [1, 31, 61][i]
 
-    # -----------------------------
-    # FILTRAR LINHAS COM ALTERNATIVAS
-    # -----------------------------
-    linhas_validas = [l for l in linhas if len(l) >= 5]
+            for q_idx in range(30):
+                q_num = start_q + q_idx
 
-    if len(linhas_validas) < 80:
-        st.error("Não consegui identificar as linhas do gabarito")
-        st.stop()
+                y1 = int(q_idx * (h_roi / 30))
+                y2 = int((q_idx + 1) * (h_roi / 30))
 
-    OPCOES = ['A','B','C','D','E']
-    respostas = {}
+                fatia = roi_col[y1:y2, :]
+                fatias = np.array_split(fatia, 5, axis=1)
 
-    # -----------------------------
-    # LER QUESTÕES
-    # -----------------------------
-    for i, linha in enumerate(linhas_validas[:90]):
+                pixels = []
 
-        # pega 5 mais à esquerda (alternativas)
-        linha = sorted(linha, key=lambda x: x[0])[:5]
+                for f in fatias:
+                    hf, wf = f.shape
+                    miolo = f[int(hf*0.1):int(hf*0.9),
+                              int(wf*0.1):int(wf*0.9)]
+                    pixels.append(cv2.countNonZero(miolo))
 
-        pixels = []
+                v_ord = sorted(pixels, reverse=True)
+                p1, p2 = v_ord[0], v_ord[1]
 
-        for (x,y) in linha:
+                if p1 < 10:
+                    respostas_finais[q_num] = "X"
+                elif (p1 - p2) > (p1 * 0.3):
+                    respostas_finais[q_num] = OPCOES[np.argmax(pixels)]
+                else:
+                    respostas_finais[q_num] = "X"
 
-            r = 10
+        st.image(img_viz)
 
-            roi = thresh[y-r:y+r, x-r:x+r]
+        resultado_str = "".join([
+            respostas_finais.get(q, "X") for q in range(1, 91)
+        ])
 
-            pixels.append(cv2.countNonZero(roi))
+        st.write(f"**Nome:** {nome_aluno}")
+        st.write(f"**Respostas:** {resultado_str}")
 
-        v = sorted(pixels, reverse=True)
-        p1, p2 = v[0], v[1]
+        if st.button("ENVIAR"):
+            requests.post(FORM_URL, data={
+                ID_NOME: nome_aluno,
+                ID_RESPOSTAS: resultado_str
+            })
+            st.success("Enviado com sucesso!")
+            st.balloons()
 
-        if p1 < 40:
-            respostas[i+1] = "X"
-        elif (p1 - p2) > p1 * 0.25:
-            respostas[i+1] = OPCOES[np.argmax(pixels)]
-        else:
-            respostas[i+1] = "X"
-
-    resultado = "".join([respostas.get(i, "X") for i in range(1,91)])
-
-    # -----------------------------
-    # OUTPUT
-    # -----------------------------
-    st.image(thresh, caption="Processado")
-    st.write("Respostas:", resultado)
-
-    if st.button("ENVIAR"):
-        requests.post(FORM_URL, data={
-            ID_NOME: nome,
-            ID_RESPOSTAS: resultado
-        })
-        st.success("Enviado com sucesso!")
+    else:
+        st.error(f"Erro: Encontradas {len(colunas)} colunas")
